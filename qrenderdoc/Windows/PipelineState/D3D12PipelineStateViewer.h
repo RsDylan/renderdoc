@@ -88,6 +88,9 @@ private:
                       RDTreeWidget *tex, RDTreeWidget *samp, RDTreeWidget *cbuffer,
                       RDTreeWidget *uavs);
 
+  bool findShaderResourceForView(const D3D12ViewTag &view, const D3D12Pipe::Shader *stage,
+                                 const Bindpoint **pBind, const ShaderResource **pShaderRsrc);
+
   void addResourceRow(const D3D12ViewTag &view, const D3D12Pipe::Shader *stage,
                       RDTreeWidget *resources);
 

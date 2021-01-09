@@ -658,14 +658,13 @@ void D3D12PipelineStateViewer::setViewDetails(RDTreeWidgetItem *node, const D3D1
   }
 }
 
-void D3D12PipelineStateViewer::addResourceRow(const D3D12ViewTag &view,
-                                              const D3D12Pipe::Shader *stage, RDTreeWidget *resources)
+bool D3D12PipelineStateViewer::findShaderResourceForView(const D3D12ViewTag &view,
+                                                         const D3D12Pipe::Shader *stage,
+                                                         const Bindpoint **pBind,
+                                                         const ShaderResource **pShaderRsrc)
 {
   const D3D12Pipe::View &r = view.res;
   bool uav = view.type == D3D12ViewTag::UAV;
-
-  const Bindpoint *bind = NULL;
-  const ShaderResource *shaderInput = NULL;
 
   if(stage && stage->reflection)
   {
@@ -686,12 +685,28 @@ void D3D12PipelineStateViewer::addResourceRow(const D3D12ViewTag &view,
 
       if(b.bindset == view.space && regMatch)
       {
-        bind = &b;
-        shaderInput = &res[i];
-        break;
+        if(pBind)
+          *pBind = &b;
+        if(pShaderRsrc)
+          *pShaderRsrc = &res[i];
+        return true;
       }
     }
   }
+
+  return false;
+}
+
+void D3D12PipelineStateViewer::addResourceRow(const D3D12ViewTag &view,
+                                              const D3D12Pipe::Shader *stage, RDTreeWidget *resources)
+{
+  const D3D12Pipe::View &r = view.res;
+  bool uav = view.type == D3D12ViewTag::UAV;
+
+  const Bindpoint *bind = NULL;
+  const ShaderResource *shaderInput = NULL;
+
+  findShaderResourceForView(view, stage, &bind, &shaderInput);
 
   bool filledSlot = (r.resourceId != ResourceId());
   bool usedSlot = (bind && bind->used);
@@ -1039,6 +1054,9 @@ void D3D12PipelineStateViewer::setShaderState(
       {
         for(size_t j = 0; j < rootElements[i].views.size(); ++j)
         {
+          D3D12ViewTag view(D3D12ViewTag::SRV, rootElements[i].registerSpace, (int)i,
+                            rootElements[i].immediate, rootElements[i].views[j]);
+
           // for empty views, if the last two views were empty and the next one is empty then just
           // emit a "..." row for large ranges of empty views
           if(rootElements[i].views[j].resourceId == ResourceId() && j > 2 &&
@@ -1047,7 +1065,8 @@ void D3D12PipelineStateViewer::setShaderState(
              rootElements[i].views[j - 1].resourceId == ResourceId() &&
              rootElements[i].views[j + 1].resourceId == ResourceId())
           {
-            if(!omittingEmpty)
+            // only emit the empty row if the binding would otherwise be valid
+            if(findShaderResourceForView(view, &stage, NULL, NULL) && !omittingEmpty)
             {
               RDTreeWidgetItem *node = new RDTreeWidgetItem(
                   {lit("..."), QString(), QString(), QString(), QString(), QString(), QString(),
@@ -1064,9 +1083,7 @@ void D3D12PipelineStateViewer::setShaderState(
 
           omittingEmpty = false;
 
-          addResourceRow(D3D12ViewTag(D3D12ViewTag::SRV, rootElements[i].registerSpace, (int)i,
-                                      rootElements[i].immediate, rootElements[i].views[j]),
-                         &stage, resources);
+          addResourceRow(view, &stage, resources);
         }
         break;
       }
@@ -1074,6 +1091,9 @@ void D3D12PipelineStateViewer::setShaderState(
       {
         for(size_t j = 0; j < rootElements[i].views.size(); ++j)
         {
+          D3D12ViewTag view(D3D12ViewTag::UAV, rootElements[i].registerSpace, (int)i,
+                            rootElements[i].immediate, rootElements[i].views[j]);
+
           // for empty views, if the last view and next two are also empty then just emit a "..."
           // row for large ranges of empty views
           if(rootElements[i].views[j].resourceId == ResourceId() && j > 1 &&
@@ -1082,7 +1102,8 @@ void D3D12PipelineStateViewer::setShaderState(
              rootElements[i].views[j + 1].resourceId == ResourceId() &&
              rootElements[i].views[j + 2].resourceId == ResourceId())
           {
-            if(!omittingEmpty)
+            // only emit the empty row if the binding would otherwise be valid
+            if(findShaderResourceForView(view, &stage, NULL, NULL) && !omittingEmpty)
             {
               RDTreeWidgetItem *node = new RDTreeWidgetItem(
                   {lit("..."), QString(), QString(), QString(), QString(), QString(), QString(),
@@ -1099,9 +1120,7 @@ void D3D12PipelineStateViewer::setShaderState(
 
           omittingEmpty = false;
 
-          addResourceRow(D3D12ViewTag(D3D12ViewTag::UAV, rootElements[i].registerSpace, (int)i,
-                                      rootElements[i].immediate, rootElements[i].views[j]),
-                         &stage, uavs);
+          addResourceRow(view, &stage, uavs);
         }
         break;
       }
