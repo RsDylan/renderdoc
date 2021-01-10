@@ -698,7 +698,8 @@ bool D3D12PipelineStateViewer::findShaderResourceForView(const D3D12ViewTag &vie
 }
 
 void D3D12PipelineStateViewer::addResourceRow(const D3D12ViewTag &view,
-                                              const D3D12Pipe::Shader *stage, RDTreeWidget *resources)
+                                              const D3D12Pipe::Shader *stage, bool *emptyBlock,
+                                              bool emitEmptyBlock, RDTreeWidget *resources)
 {
   const D3D12Pipe::View &r = view.res;
   bool uav = view.type == D3D12ViewTag::UAV;
@@ -706,7 +707,31 @@ void D3D12PipelineStateViewer::addResourceRow(const D3D12ViewTag &view,
   const Bindpoint *bind = NULL;
   const ShaderResource *shaderInput = NULL;
 
-  findShaderResourceForView(view, stage, &bind, &shaderInput);
+  if(stage && stage->reflection)
+  {
+    const rdcarray<Bindpoint> &binds = uav ? stage->bindpointMapping.readWriteResources
+                                           : stage->bindpointMapping.readOnlyResources;
+    const rdcarray<ShaderResource> &res =
+        uav ? stage->reflection->readWriteResources : stage->reflection->readOnlyResources;
+    for(int i = 0; i < binds.count(); i++)
+    {
+      const Bindpoint &b = binds[i];
+
+      bool regMatch = (b.bind == (int)view.res.bind);
+
+      // handle unbounded arrays specially. It's illegal to have an unbounded array with
+      // anything after it
+      if(b.bind <= (int)view.res.bind)
+        regMatch = (b.arraySize == ~0U) || (b.bind + (int)b.arraySize > (int)view.res.bind);
+
+      if(b.bindset == view.space && regMatch)
+      {
+        bind = &b;
+        shaderInput = &res[i];
+        break;
+      }
+    }
+  }
 
   bool filledSlot = (r.resourceId != ResourceId());
   bool usedSlot = (bind && bind->used);
@@ -715,7 +740,27 @@ void D3D12PipelineStateViewer::addResourceRow(const D3D12ViewTag &view,
   if(filledSlot)
     usedSlot = usedSlot || view.type == D3D12ViewTag::OMTarget || view.type == D3D12ViewTag::OMDepth;
 
-  if(showNode(usedSlot, filledSlot))
+  // If this is a filled slot we reset the emptyBlock state
+  if(filledSlot && usedSlot)
+  {
+    if(emptyBlock)
+      *emptyBlock = false;
+  }
+
+  // We only emit an empty block when asked, if there is actually a binding for this resource,
+  // and if we're not showing empty resources
+  //const bool showEmpty = ui->showEmpty->isChecked();
+  if(emitEmptyBlock && usedSlot/* && !showEmpty*/)
+  {
+    RDTreeWidgetItem *node =
+        new RDTreeWidgetItem({lit("..."), QString(), QString(), QString(), QString(), QString(),
+                              QString(), QString(), QString(), QString(), QString()});
+
+    setEmptyRow(node);
+
+    resources->addTopLevelItem(node);
+  }
+  else if(showNode(usedSlot, filledSlot))
   {
     QString regname = QString::number(view.res.bind);
 
@@ -1046,7 +1091,8 @@ void D3D12PipelineStateViewer::setShaderState(
     if((rootElements[i].visibility & MaskForStage(stage.stage)) == ShaderStageMask::Unknown)
       continue;
 
-    bool omittingEmpty = false;
+    bool emptyBlock = false;
+    bool emitEmptyBlock = false;
 
     switch(rootElements[i].type)
     {
@@ -1054,9 +1100,6 @@ void D3D12PipelineStateViewer::setShaderState(
       {
         for(size_t j = 0; j < rootElements[i].views.size(); ++j)
         {
-          D3D12ViewTag view(D3D12ViewTag::SRV, rootElements[i].registerSpace, (int)i,
-                            rootElements[i].immediate, rootElements[i].views[j]);
-
           // for empty views, if the last two views were empty and the next one is empty then just
           // emit a "..." row for large ranges of empty views
           if(rootElements[i].views[j].resourceId == ResourceId() && j > 2 &&
@@ -1065,25 +1108,16 @@ void D3D12PipelineStateViewer::setShaderState(
              rootElements[i].views[j - 1].resourceId == ResourceId() &&
              rootElements[i].views[j + 1].resourceId == ResourceId())
           {
-            // only emit the empty row if the binding would otherwise be valid
-            if(findShaderResourceForView(view, &stage, NULL, NULL) && !omittingEmpty)
-            {
-              RDTreeWidgetItem *node = new RDTreeWidgetItem(
-                  {lit("..."), QString(), QString(), QString(), QString(), QString(), QString(),
-                   QString(), QString(), QString(), QString()});
-
-              setEmptyRow(node);
-
-              resources->addTopLevelItem(node);
-            }
-
-            omittingEmpty = true;
-            continue;
+            if(!emptyBlock)
+              emitEmptyBlock = true;
+            emptyBlock = true;
           }
 
-          omittingEmpty = false;
+          addResourceRow(D3D12ViewTag(D3D12ViewTag::SRV, rootElements[i].registerSpace, (int)i,
+                                      rootElements[i].immediate, rootElements[i].views[j]),
+                         &stage, &emptyBlock, emitEmptyBlock, resources);
 
-          addResourceRow(view, &stage, resources);
+          emitEmptyBlock = false;
         }
         break;
       }
@@ -1091,9 +1125,6 @@ void D3D12PipelineStateViewer::setShaderState(
       {
         for(size_t j = 0; j < rootElements[i].views.size(); ++j)
         {
-          D3D12ViewTag view(D3D12ViewTag::UAV, rootElements[i].registerSpace, (int)i,
-                            rootElements[i].immediate, rootElements[i].views[j]);
-
           // for empty views, if the last view and next two are also empty then just emit a "..."
           // row for large ranges of empty views
           if(rootElements[i].views[j].resourceId == ResourceId() && j > 1 &&
@@ -1102,25 +1133,16 @@ void D3D12PipelineStateViewer::setShaderState(
              rootElements[i].views[j + 1].resourceId == ResourceId() &&
              rootElements[i].views[j + 2].resourceId == ResourceId())
           {
-            // only emit the empty row if the binding would otherwise be valid
-            if(findShaderResourceForView(view, &stage, NULL, NULL) && !omittingEmpty)
-            {
-              RDTreeWidgetItem *node = new RDTreeWidgetItem(
-                  {lit("..."), QString(), QString(), QString(), QString(), QString(), QString(),
-                   QString(), QString(), QString(), QString()});
-
-              setEmptyRow(node);
-
-              resources->addTopLevelItem(node);
-            }
-
-            omittingEmpty = true;
-            continue;
+            if(!emptyBlock)
+              emitEmptyBlock = true;
+            emptyBlock = true;
           }
 
-          omittingEmpty = false;
+          addResourceRow(D3D12ViewTag(D3D12ViewTag::UAV, rootElements[i].registerSpace, (int)i,
+                                      rootElements[i].immediate, rootElements[i].views[j]),
+                         &stage, &emptyBlock, emitEmptyBlock, uavs);
 
-          addResourceRow(view, &stage, uavs);
+          emitEmptyBlock = false;
         }
         break;
       }
@@ -1800,14 +1822,14 @@ void D3D12PipelineStateViewer::setState()
     {
       addResourceRow(
           D3D12ViewTag(D3D12ViewTag::OMTarget, 0, 0, false, state.outputMerger.renderTargets[i]),
-          NULL, ui->targetOutputs);
+          NULL, NULL, false, ui->targetOutputs);
 
       if(state.outputMerger.renderTargets[i].resourceId != ResourceId())
         targets[i] = true;
     }
 
     addResourceRow(D3D12ViewTag(D3D12ViewTag::OMDepth, 0, 0, false, state.outputMerger.depthTarget),
-                   NULL, ui->targetOutputs);
+                   NULL, NULL, false, ui->targetOutputs);
   }
   ui->targetOutputs->clearSelection();
   ui->targetOutputs->endUpdate();

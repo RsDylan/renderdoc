@@ -91,8 +91,8 @@ private:
   bool findShaderResourceForView(const D3D12ViewTag &view, const D3D12Pipe::Shader *stage,
                                  const Bindpoint **pBind, const ShaderResource **pShaderRsrc);
 
-  void addResourceRow(const D3D12ViewTag &view, const D3D12Pipe::Shader *stage,
-                      RDTreeWidget *resources);
+  void addResourceRow(const D3D12ViewTag &view, const D3D12Pipe::Shader *stage, bool *emptyBlock,
+                      bool emitEmptyBlock, RDTreeWidget *resources);
 
   void clearShaderState(RDLabel *shader, RDLabel *rootSig, RDTreeWidget *tex, RDTreeWidget *samp,
                         RDTreeWidget *cbuffer, RDTreeWidget *uavs);
