@@ -658,45 +658,6 @@ void D3D12PipelineStateViewer::setViewDetails(RDTreeWidgetItem *node, const D3D1
   }
 }
 
-bool D3D12PipelineStateViewer::findShaderResourceForView(const D3D12ViewTag &view,
-                                                         const D3D12Pipe::Shader *stage,
-                                                         const Bindpoint **pBind,
-                                                         const ShaderResource **pShaderRsrc)
-{
-  const D3D12Pipe::View &r = view.res;
-  bool uav = view.type == D3D12ViewTag::UAV;
-
-  if(stage && stage->reflection)
-  {
-    const rdcarray<Bindpoint> &binds = uav ? stage->bindpointMapping.readWriteResources
-                                           : stage->bindpointMapping.readOnlyResources;
-    const rdcarray<ShaderResource> &res =
-        uav ? stage->reflection->readWriteResources : stage->reflection->readOnlyResources;
-    for(int i = 0; i < binds.count(); i++)
-    {
-      const Bindpoint &b = binds[i];
-
-      bool regMatch = (b.bind == (int)view.res.bind);
-
-      // handle unbounded arrays specially. It's illegal to have an unbounded array with
-      // anything after it
-      if(b.bind <= (int)view.res.bind)
-        regMatch = (b.arraySize == ~0U) || (b.bind + (int)b.arraySize > (int)view.res.bind);
-
-      if(b.bindset == view.space && regMatch)
-      {
-        if(pBind)
-          *pBind = &b;
-        if(pShaderRsrc)
-          *pShaderRsrc = &res[i];
-        return true;
-      }
-    }
-  }
-
-  return false;
-}
-
 void D3D12PipelineStateViewer::addResourceRow(const D3D12ViewTag &view,
                                               const D3D12Pipe::Shader *stage, bool *emptyBlock,
                                               bool emitEmptyBlock, RDTreeWidget *resources)
